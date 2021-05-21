@@ -1,167 +1,7 @@
-//Import Libraries
-#include <Wire.h>
-#include <Adafruit_Sensor.h>
-#include <Adafruit_LSM303_U.h>
-#include <Adafruit_L3GD20_U.h>
-#include <Adafruit_9DOF.h>
-#include <QueueList.h>
-#include <Servo.h>
-
-/** 
- * User Config Parameters
- */
-#define TCAADDR 0x70  //Set the address for the multiplex board.
-#define MOVINGAVGCOUNT 20 //How many readings to calculate for a moving-average
-
-const bool DEBUG = true; //Enable for serial monitor logging.
-
-//Flips sensor readings depending on normal position.  (1, -1)
-const int invertPitch = 1;
-const int invertHeading = 1;
-
-//LED will give us status of the loop, if it turns off something failed.
-const int LED_PIN = 13;
-
-// Prevent the servos from rotating beyond mechanical limits 
-const int maxPitch = 135;
-const int minPitch = 45;
-// NOTE: Yaw direction is inverted via map() method in moveServos()
-const int maxHeading = 135;
-const int minHeading = 45;
-
-//used to center servos when gyros are level.  
-//e.g. 0 degrees becomes 90 degrees, the middle of the servo's swing.
-//Adjust this to compensate for your actual mounting position
-const int servoPitchOffset = 90;
-const int servoHeadingOffset = 90;
-
-//millis between servo position write events.
-const int servoDelay = 1000;
-/** 
- * End User Config Parameters
- */
-
-// Assign array instances to each of the gyro/mag sensors & initialize arr elements */
-Adafruit_9DOF                 dof[2]   = {Adafruit_9DOF()};  //DOF means Degrees of freedom, i.e. 9-axis
-Adafruit_LSM303_Accel_Unified accel[2] = {Adafruit_LSM303_Accel_Unified(30301)};
-Adafruit_LSM303_Mag_Unified   mag[2]   = {Adafruit_LSM303_Mag_Unified(30302)};
-
-// Queues to store sensor readings for a moving-average debounce
-QueueList <float> pitchQueue[2], headingQueue[2];
-
-//To assist in calculating moving averages for debouncing pitch readings
-float pitchSUM[2] = {0.0, 0.0};  
-float headingSUM[2] = {0.0, 0.0};
-
-//Store the startup values to normalize neutral positions.
-float pitchOFFSET[2], headingOFFSET[2];
-
-// Will be used for timing events.
-unsigned long currentMillis = 0;    // stores the value of millis() in each iteration of loop()
-unsigned long prevMillis = 0;    // stores the value of millis() in each iteration of loop() 
-
-/**
- * @brief Writes Queue status to serial monitor during setup
- * @details Used for validation and troubleshooting to verify the
- *          queue is being filled with valid readings before calculating
- *          moving averages.
- * 
- * @param port Index of the current sensor port on the multiplexer
- * @param currentPitch Angle in degrees from the accel/gyro.
- * @param count Index of the queue which is being populated.
- */
-void logQueueStatus(int port, float currentPitch, int count, String queue) {
-    if (DEBUG) {
-        String logMessage = "Filling ";
-        logMessage.concat(queue);
-        logMessage.concat(": [");
-        logMessage.concat(port);
-        logMessage.concat("][");
-        logMessage.concat(count);
-        logMessage.concat("] Value: ");
-        logMessage.concat(currentPitch);
-        Serial.println(logMessage);
-    }
-}
-
-/**
- * @brief Writes current pitch reading to the serial monitor.
- * 
- * @param port Index of the current sensor port on the multiplexer
- * @param currentPitch Moving average of the last N pitch readings.
- */
-void logPitchValue(int port, float currentPitch) {
-    if (DEBUG) {
-        String logMessage = "[";
-        logMessage.concat(port);
-        logMessage.concat("] Pitch: ");
-        logMessage.concat(currentPitch);
-        logMessage.concat("; ");
-        Serial.print(logMessage);
-    }
-}
-
-/**
- * @brief Writes current heading reading to the serial monitor.
- * 
- * @param currentHeading Moving average of the last N heading readings.
- */
-void logHeadingValue(float currentHeading) {
-    if (DEBUG) {
-        String logMessage = "Heading: ";
-        logMessage.concat(currentHeading);
-        logMessage.concat("; ");
-        Serial.print(logMessage);
-    }
-}
-
-/**
- * @brief Writes current heading reading to the serial monitor.
- * 
- * @param currentHeading Moving average of the last N heading readings.
- */
-void logPitchOffset(int port) {
-    if (DEBUG) {
-        String logMessage = "pitchOFFSET: [";
-        logMessage.concat(port);
-        logMessage.concat("] = ");
-        logMessage.concat(pitchOFFSET[port]);
-        logMessage.concat("; ");
-        Serial.println(logMessage);
-    }
-}
-
-/**
- * @brief Writes current heading reading to the serial monitor.
- * 
- * @param currentHeading Moving average of the last N heading readings.
- */
-void logHeadingOffset(int port) {
-    if (DEBUG) {
-        String logMessage = "headingOFFSET: [";
-        logMessage.concat(port);
-        logMessage.concat("] = ");
-        logMessage.concat(headingOFFSET[port]);
-        logMessage.concat("; ");
-        Serial.println(logMessage);
-    }
-}
-
-/**
- * @brief Writes current servo positions to the serial monitor.
- * 
- * @param servoPositions pitch,heading array calculated from calcServoPositions.
- */
-void logServoPositions(int* servoPositions) {
-    if (DEBUG) {
-        String logMessage = "Servo Positions | Pitch: [";
-        logMessage.concat(servoPositions[0]);
-        logMessage.concat("] Heading: [");
-        logMessage.concat(servoPositions[1]);
-        logMessage.concat("]");
-        Serial.print(logMessage);
-    }
-}
+#include "libraries.h"
+#include "configuration.h"
+#include "declarations.hpp"
+#include "serial-logging.hpp"
 
 /**
  * @brief Select and enable the desired port on the multiplexer
@@ -184,7 +24,7 @@ void tcaSelect(uint8_t i) {
  * @param accel Sensor reference object.
  * @param mag Sensor reference object.
  */
-float* getSensorData( int port,
+float getSensorData( int port,
                         Adafruit_9DOF dof,
                         Adafruit_LSM303_Accel_Unified accel,
                         Adafruit_LSM303_Mag_Unified   mag) {
@@ -193,7 +33,7 @@ float* getSensorData( int port,
     sensors_event_t mag_event;
     sensors_vec_t   orientation;
 
-    float pitchHeading[2];
+    float pitchAndHeadingArray[2];
 
     /* Calculate pitch and roll from the raw accelerometer data */
     accel.getEvent(&accel_event);
@@ -207,7 +47,7 @@ float* getSensorData( int port,
         
         float finalPitchVal = getFinalPitchVal(port, currentPitch);
 
-        pitchHeading[0] = finalPitchVal;
+        pitchAndHeadingArray[0] = finalPitchVal;
         
     }
 
@@ -223,10 +63,10 @@ float* getSensorData( int port,
         
         float finalHeadingVal = getFinalHeadingVal(port, currentHeading);
 
-        pitchHeading[1] = finalHeadingVal;
+        pitchAndHeadingArray[1] = finalHeadingVal;
     }
 
-    return pitchHeading;
+    return pitchAndHeadingArray;
 
 }
 
@@ -416,7 +256,7 @@ void setup() {
 
         if(!mag[i].begin())
         {
-            /* There was a problem detecting the LSM303 manetometer */
+            /* There was a problem detecting the LSM303 magnetometer */
             Serial.println("Oops, no Magnetometer detected on port [" + String(i) + "] - Check your wiring!");
             //while(1); //stall the program, do not continue.
         }
@@ -440,9 +280,10 @@ void loop() {
         tcaSelect(i);  //Enable the port
 
         //Read, store, and (optionally if Debug is on) display the data.
-        float* pitchHeading = getSensorData(i, dof[i], accel[i], mag[i]); 
-        pitch[i] = pitchHeading[0];
-        heading[i] = pitchHeading[1];
+        float pitchAndHeadingArray = getSensorData(i, dof[i], accel[i], mag[i]); 
+        pitch[i] = pitchAndHeadingArray[0]; 
+        logPitchValue(i, pitch[i]);       
+        heading[i] = pitchAndHeadingArray[1];
     }
 
     //Calculate the difference in angle between the two sensors.
