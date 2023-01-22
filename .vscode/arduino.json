@@ -1,0 +1,5 @@
+{
+    "board": "atmel-avr-xminis:avr:atmega328p_xplained_mini",
+    "port": "/dev/tty.usbserial-401310",
+    "sketch": "Ardu_Predator_Multi/Ardu_Predator_Multi.ino"
+}
